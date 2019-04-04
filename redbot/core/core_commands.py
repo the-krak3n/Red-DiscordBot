@@ -296,35 +296,38 @@ class Core(commands.Cog, CoreLogic):
         app_info = await self.bot.application_info()
         owner = app_info.owner
         custom_info = await self.bot.db.custom_info()
+        discord_server = "https://discord.gg/eYFxDJC"
 
         async with aiohttp.ClientSession() as session:
             async with session.get("{}/json".format(red_pypi)) as r:
                 data = await r.json()
         outdated = VersionInfo.from_str(data["info"]["version"]) > red_version_info
         about = (
-            "This is an instance of [Red, an open source Discord bot]({}) "
+            "This is an custom fork of [Red, an open source Discord bot]({}) "
             "created by [Twentysix]({}) and [improved by many]({}).\n\n"
+            "For support with this bot please join my support [discord server]({})\n\n"
             "Red is backed by a passionate community who contributes and "
             "creates content for everyone to enjoy. [Join us today]({}) "
             "and help us improve!\n\n"
-            "".format(red_repo, author_repo, org_repo, support_server_url)
+            "".format(red_repo, author_repo, org_repo, discord_server, support_server_url)
         )
 
         embed = discord.Embed(color=(await ctx.embed_colour()))
-        embed.add_field(name="Instance owned by", value=str(owner))
-        embed.add_field(name="Python", value=python_version)
-        embed.add_field(name="discord.py", value=dpy_version)
-        embed.add_field(name="Red version", value=red_version)
+        embed.set_thumbnail(url=ctx.bot.user.avatar_url_as(static_format="png"))
+        embed.add_field(name="\N{HAMMER AND WRENCH}""Instance owned by", value=str(owner))
+        embed.add_field(name="\N{GEAR}""Libraries", value="Python: {} \nDiscord.py {} \nRed Version: {}".format(python_version, dpy_version, red_version))
+        
         if outdated:
             embed.add_field(
                 name="Outdated", value="Yes, {} is available".format(data["info"]["version"])
             )
         if custom_info:
             embed.add_field(name="About this instance", value=custom_info, inline=False)
-        embed.add_field(name="About Red", value=about, inline=False)
+        embed.add_field(name="\N{PUSHPIN}""About Red", value=about, inline=False)
 
         embed.set_footer(
-            text="Bringing joy since 02 Jan 2016 (over {} days ago!)".format(days_since)
+            text="Bringing joy since 02 Jan 2016 (over {} days ago!)".format(days_since),
+            icon_url="https://cdn.discordapp.com/icons/133049272517001216/83b39ff510bb7c3f5aeb51270af09ad3.webp"
         )
         try:
             await ctx.send(embed=embed)
@@ -457,7 +460,6 @@ class Core(commands.Cog, CoreLogic):
             await ctx.send("No exception has occurred yet")
 
     @commands.command()
-    @checks.is_owner()
     async def invite(self, ctx: commands.Context):
         """Show's Red's invite url"""
         await ctx.author.send(await self._invite_url())
@@ -1080,25 +1082,6 @@ class Core(commands.Cog, CoreLogic):
         await ctx.bot.db.help.page_char_limit.set(limit)
         await ctx.send(_("Done. The character limit per page has been set to {}.").format(limit))
 
-    @helpset.command(name="maxpages")
-    async def helpset_maxpages(self, ctx: commands.Context, pages: int):
-        """Set the maximum number of help pages sent in a server channel.
-
-        This setting only applies to embedded help.
-
-        If a help message contains more pages than this value, the help message will
-        be sent to the command author via DM. This is to help reduce spam in server
-        text channels.
-
-        The default value is 2 pages.
-        """
-        if pages < 0:
-            await ctx.send(_("You must give a value of zero or greater!"))
-            return
-
-        await ctx.bot.db.help.max_pages_in_guild.set(pages)
-        await ctx.send(_("Done. The page limit has been set to {}.").format(pages))
-
     @helpset.command(name="tagline")
     async def helpset_tagline(self, ctx: commands.Context, *, tagline: str = None):
         """
@@ -1122,6 +1105,21 @@ class Core(commands.Cog, CoreLogic):
 
         await ctx.bot.db.help.tagline.set(tagline)
         await ctx.send(_("The tagline has been set to {}.").format(tagline[:1900]))
+
+    @helpset.command(name="dm")
+    async def helpset_toggle_dm(self, ctx: commands.Context):
+        """Toggle whether help will be sent in a DM or not.
+         If this is enabled, the help message will be sent to the
+        command author via DM.
+         The default value is None
+        """
+        current_setting = ctx.bot.pm_help
+        ctx.bot.pm_help = not current_setting
+        await ctx.send(
+            _("Done. Help will now be sent in {}.").format(
+                _("DMs") if not current_setting else _("the channel")
+            )
+        )
 
     @commands.command()
     @checks.is_owner()
@@ -1491,8 +1489,8 @@ class Core(commands.Cog, CoreLogic):
         """
         user = isinstance(user_or_role, discord.Member)
         async with ctx.bot.db.guild(ctx.guild).whitelist() as curr_list:
-            if user_or_role.id not in curr_list:
-                curr_list.append(user_or_role.id)
+            if obj.id not in curr_list:
+                curr_list.append(obj.id)
 
         if user:
             await ctx.send(_("User added to whitelist."))
@@ -1524,9 +1522,9 @@ class Core(commands.Cog, CoreLogic):
 
         removed = False
         async with ctx.bot.db.guild(ctx.guild).whitelist() as curr_list:
-            if user_or_role.id in curr_list:
+            if obj.id in curr_list:
                 removed = True
-                curr_list.remove(user_or_role.id)
+                curr_list.remove(obj.id)
 
         if removed:
             if user:
@@ -1570,8 +1568,8 @@ class Core(commands.Cog, CoreLogic):
             return
 
         async with ctx.bot.db.guild(ctx.guild).blacklist() as curr_list:
-            if user_or_role.id not in curr_list:
-                curr_list.append(user_or_role.id)
+            if obj.id not in curr_list:
+                curr_list.append(obj.id)
 
         if user:
             await ctx.send(_("User added to blacklist."))
@@ -1603,9 +1601,9 @@ class Core(commands.Cog, CoreLogic):
         user = isinstance(user_or_role, discord.Member)
 
         async with ctx.bot.db.guild(ctx.guild).blacklist() as curr_list:
-            if user_or_role.id in curr_list:
+            if obj.id in curr_list:
                 removed = True
-                curr_list.remove(user_or_role.id)
+                curr_list.remove(obj.id)
 
         if removed:
             if user:

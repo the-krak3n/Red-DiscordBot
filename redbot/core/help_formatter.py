@@ -24,19 +24,21 @@ discord.py 1.0.0a
 This help formatter contains work by Rapptz (Danny) and SirThane#1780.
 """
 import contextlib
+import inspect
+import itertools
+import re
+
 from collections import namedtuple
 from typing import List, Optional, Union
 
 import discord
 from discord.ext.commands import formatter as dpy_formatter
-import inspect
-import itertools
-import re
+
 
 from . import commands
 from .i18n import Translator
+from .utils import fuzzy_command_search, format_fuzzy_results, menus
 from .utils.chat_formatting import pagify
-from .utils import fuzzy_command_search, format_fuzzy_results
 
 _ = Translator("Help", __file__)
 
@@ -57,10 +59,6 @@ class Help(dpy_formatter.HelpFormatter):
         self.command = None
         super().__init__(*args, **kwargs)
 
-    @staticmethod
-    def pm_check(ctx):
-        return isinstance(ctx.channel, discord.DMChannel)
-
     @property
     def me(self):
         return self.context.me
@@ -74,7 +72,7 @@ class Help(dpy_formatter.HelpFormatter):
         return self.context.bot.user.avatar_url_as(format="png")
 
     async def color(self):
-        if self.pm_check(self.context):
+        if pm_check(self.context):
             return self.context.bot.color
         else:
             return await self.context.embed_colour()
@@ -92,7 +90,7 @@ class Help(dpy_formatter.HelpFormatter):
     @property
     def author(self):
         # Get author dict with username if PM and display name in guild
-        if self.pm_check(self.context):
+        if pm_check(self.context):
             name = self.context.bot.user.name
         else:
             name = self.me.display_name if not "" else self.context.bot.user.name
@@ -184,41 +182,51 @@ class Help(dpy_formatter.HelpFormatter):
             for category, commands_ in itertools.groupby(data, key=category):
                 commands_ = sorted(commands_)
                 if len(commands_) > 0:
-                    for i, page in enumerate(
-                        pagify(self._add_subcommands(commands_), page_length=1000)
-                    ):
-                        title = category if i < 1 else f"{category} (continued)"
-                        field = EmbedField(title, page, False)
-                        emb["fields"].append(field)
+                    title = category
+                    field = EmbedField(title, self._add_subcommands(commands_), False)
+                    emb["fields"].append(field)
 
         else:
             # Get list of commands for category
             filtered = sorted(filtered)
             if filtered:
-                for i, page in enumerate(
-                    pagify(self._add_subcommands(filtered), page_length=1000)
-                ):
-                    title = (
-                        "**__Commands:__**"
-                        if not self.is_bot() and self.is_cog()
-                        else "**__Subcommands:__**"
-                    )
-                    if i > 0:
-                        title += " (continued)"
-                    field = EmbedField(title, page, False)
-                    emb["fields"].append(field)
+                title = (
+                    "**__Commands:__**"
+                    if not self.is_bot() and self.is_cog()
+                    else "**__Subcommands:__**"
+                )
+                field = EmbedField(title, self._add_subcommands(filtered), False)
+                emb["fields"].append(field)
 
         return emb
 
     @staticmethod
     def group_fields(fields: List[EmbedField], max_chars=1000):
+        if max_chars > 1000:
+            max_chars = 1000
         curr_group = []
         ret = []
         for f in fields:
-            if sum(len(f2.value) for f2 in curr_group) + len(f.value) > max_chars and curr_group:
-                ret.append(curr_group)
-                curr_group = []
-            curr_group.append(f)
+            # Check if adding the field would go over the limit
+            #   If so, clear the curr_group if it's not empty
+            #   If it still is over the limit, pagify it and don't do regular appends
+
+            while sum(len(f2.value) for f2 in curr_group) + len(f.value) > max_chars:
+                if curr_group:
+                    ret.append(curr_group)
+                    curr_group = []
+                else:
+                    pagify_me_captain = []
+                    for i, page in enumerate(pagify(f.value, page_length=max_chars)):
+                        title = f.name if i < 1 else f"{f.name} (continued)"
+                        field = EmbedField(title, page, False)
+                        pagify_me_captain.append([field])
+                    curr_group = pagify_me_captain.pop()
+                    ret.extend(pagify_me_captain)
+                    break
+            else:
+                curr_group.append(f)
+            
 
         if len(curr_group) > 0:
             ret.append(curr_group)
@@ -303,6 +311,9 @@ class Help(dpy_formatter.HelpFormatter):
             footer={"text": self.get_ending_note()},
         )
 
+def pm_check(ctx):
+    return isinstance(ctx.channel, discord.DMChannel) or ctx.bot.pm_help
+
 
 @commands.command(hidden=True)
 async def help(ctx: commands.Context, *, command_name: str = ""):
@@ -313,12 +324,13 @@ async def help(ctx: commands.Context, *, command_name: str = ""):
     - `[p]help Category`: Show commands and description for a category,
     """
     bot = ctx.bot
-    if bot.pm_help:
-        destination = ctx.author
+    if pm_check(ctx) or not ctx.guild.me.permissions_in(ctx.channel).send_messages:
+        pm_destination = True
+        use_embeds = await ctx.bot.embed_requested(ctx.author.dm_channel, ctx.author, ctx.command)
     else:
-        destination = ctx.channel
+        pm_destination = False
+        use_embeds = await ctx.embed_requested()
 
-    use_embeds = await ctx.embed_requested()
     if use_embeds:
         formatter = bot.formatter
     else:
@@ -341,17 +353,20 @@ async def help(ctx: commands.Context, *, command_name: str = ""):
         else:
             pages = await formatter.format_help_for(ctx, command)
 
-    max_pages_in_guild = await ctx.bot.db.help.max_pages_in_guild()
-    if len(pages) > max_pages_in_guild:
+    if pm_destination:
         destination = ctx.author
-    if ctx.guild and not ctx.guild.me.permissions_in(ctx.channel).send_messages:
-        destination = ctx.author
+    else:
+        destination = ctx
+
     try:
-        for page in pages:
-            if isinstance(page, discord.Embed):
-                await destination.send(embed=page)
-            else:
-                await destination.send(page)
+        if pm_destination or len(pages) <= 1:
+            for page in pages:
+                if isinstance(page, discord.Embed):
+                    await destination.send(embed=page)
+                else:
+                    await destination.send(page)
+        else:
+            await menus.menu(ctx, pages, menus.DEFAULT_CONTROLS, timeout=60.0)
     except discord.Forbidden:
         await ctx.channel.send(
             _(
