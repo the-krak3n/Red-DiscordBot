@@ -125,7 +125,7 @@ class ModInfo(MixinMeta):
             activity = _("Watching {}").format(user.activity.name)
 
         if roles:
-            roles = ", ".join([x.name for x in roles])
+            roles = ", ".join([x.mention for x in roles])
         else:
             roles = None
 
