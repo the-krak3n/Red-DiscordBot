@@ -265,7 +265,11 @@ class Economy(commands.Cog):
                     await bank.set_balance(author, exc.max_balance)
                     await ctx.send(
                         _(
+<<<<<<< HEAD
                             "You've reached the maximum amount of {currency}! (**{new_balance:,}**) "
+=======
+                            "You've reached the maximum amount of {currency}!"
+>>>>>>> develop
                             "Please spend some more \N{GRIMACING FACE}\n\n"
                             "You currently have {new_balance} {currency}."
                         ).format(currency=credits_name, new_balance=exc.max_balance)
