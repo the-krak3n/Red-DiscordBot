@@ -274,14 +274,8 @@ class Economy(commands.Cog):
                     await bank.deposit_credits(author, await self.config.PAYDAY_CREDITS())
                 except errors.BalanceTooHigh as exc:
                     await bank.set_balance(author, exc.max_balance)
-<<<<<<< HEAD
                     embed = discord.Embed(
                         title="PAYDAY \N{MONEY BAG}", description="You've reached the **maximum** amount of {currency}!\n "
-=======
-                    await ctx.send(
-                        _(
-                            "You've reached the maximum amount of {currency}! (**{new_balance:,}**) "
->>>>>>> parent of e255de0... Merge remote-tracking branch 'Cog-Creators/V3/develop' into V3/develop
                             "Please spend some more \N{GRIMACING FACE}\n\n"
                             "You currently have **{new_balance} {currency}.**"
                         .format(currency=credits_name, new_balance=exc.max_balance), color= await ctx.embed_color()
