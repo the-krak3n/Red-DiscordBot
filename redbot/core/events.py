@@ -15,7 +15,6 @@ from pkg_resources import DistributionNotFound
 
 from .. import __version__ as red_version, version_info as red_version_info, VersionInfo
 from . import commands
-from .config import get_latest_confs
 from .data_manager import storage_type
 from .utils.chat_formatting import inline, bordered, format_perms_list, humanize_timedelta
 from .utils import fuzzy_command_search, format_fuzzy_results
@@ -260,7 +259,9 @@ def init_events(bot, cli_flags):
                     "clock. Any time sensitive code may fail.",
                     diff,
                 )
-            bot.checked_time_accuracy = discord_now
+            bot.checked_time_accuracy = discord_now  
+        if message.author.id == bot.user.id:
+            bot.counter["msg_sent"] += 1
 
     @bot.event
     async def on_resumed():
@@ -290,6 +291,8 @@ def init_events(bot, cli_flags):
     @bot.event
     async def on_guild_join(guild: discord.Guild):
         await _guild_added(guild)
+        bot.counter["guild_join"] += 1
+
 
     @bot.event
     async def on_guild_available(guild: discord.Guild):
@@ -305,14 +308,7 @@ def init_events(bot, cli_flags):
             command_obj = bot.get_command(command_name)
             if command_obj is not None:
                 command_obj.enable_in(guild)
-
-    @bot.event
-    async def on_cog_add(cog: commands.Cog):
-        confs = get_latest_confs()
-        for c in confs:
-            uuid = c.unique_identifier
-            group_data = c.custom_groups
-            await bot.db.custom("CUSTOM_GROUPS", c.cog_name, uuid).set(group_data)
+        bot.counter["guild_remove"] += 1
 
 
 def _get_startup_screen_specs():
