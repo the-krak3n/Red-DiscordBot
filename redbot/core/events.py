@@ -162,7 +162,6 @@ def init_events(bot, cli_flags):
 
     @bot.event
     async def on_command_error(ctx, error, unhandled_by_cog=False):
-
         if not unhandled_by_cog:
             if hasattr(ctx.command, "on_error"):
                 return
@@ -197,6 +196,7 @@ def init_events(bot, cli_flags):
                 traceback.format_exception(type(error), error, error.__traceback__)
             )
             bot._last_exception = exception_log
+            bot.counter['cmd_error'] += 1
             await ctx.send(inline(message))
         elif isinstance(error, commands.CommandNotFound):
             fuzzy_commands = await fuzzy_command_search(ctx)
@@ -241,6 +241,7 @@ def init_events(bot, cli_flags):
             )
         else:
             log.exception(type(error).__name__, exc_info=error)
+        
 
     @bot.event
     async def on_message(message):
