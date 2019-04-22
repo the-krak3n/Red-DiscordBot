@@ -305,11 +305,12 @@ class Core(commands.Cog, CoreLogic):
         about = (
             "This is an custom fork of [Red, an open source Discord bot]({}) "
             "created by [Twentysix]({}) and [improved by many]({}).\n\n"
+            "Please do not bother Red Support for issues with my bot as they will not be able to help you. "
             "For support with this bot please join my support [discord server]({})\n\n"
-            "Red is backed by a passionate community who contributes and "
-            "creates content for everyone to enjoy. [Join us today]({}) "
-            "and help us improve!\n\n"
-            "".format(red_repo, author_repo, org_repo, discord_server, support_server_url)
+            
+            "This fork has numerous modifications to core Red. Some may get merged into "
+            "the main project via PR at a later date, but most changes are custom for {}\n\n"
+            "".format(red_repo, author_repo, org_repo, discord_server, ctx.bot.user.name)
         )
 
         embed = discord.Embed(color=(await ctx.embed_colour()))
@@ -323,7 +324,7 @@ class Core(commands.Cog, CoreLogic):
             )
         if custom_info:
             embed.add_field(name="About this instance", value=custom_info, inline=False)
-        embed.add_field(name="\N{PUSHPIN}""About Red", value=about, inline=False)
+        embed.add_field(name="\N{PUSHPIN}""About {}".format(ctx.bot.user.name), value=about, inline=False)
 
         embed.set_footer(
             text="Bringing joy since 02 Jan 2016 (over {} days ago!)".format(days_since),

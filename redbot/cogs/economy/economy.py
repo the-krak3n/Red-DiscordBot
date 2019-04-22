@@ -315,7 +315,7 @@ class Economy(commands.Cog):
                 dtime = self.display_time(next_payday - cur_time)
                 embed = discord.Embed(
                     description="\N{CROSS MARK} {author.mention} Too soon.\n\n For your next payday you have to wait {time}."
-                    .format(author=author, time=dtime)
+                    .format(author=author, time=dtime), color= await ctx.embed_color()
                 )
                 embed.set_thumbnail(url="https://photos.kstj.us/SubmissiveEverlastingStork.png")
                 await ctx.send(embed=embed)
@@ -337,7 +337,8 @@ class Economy(commands.Cog):
                         title="PAYDAY \N{MONEY BAG}", description="You've reached the **maximum** amount of {currency}!\n "
                             "Please spend some more \N{GRIMACING FACE}\n\n"
                             "You currently have **{new_balance} {currency}.**"
-                        .format(currency=credits_name, new_balance=exc.max_balance)
+                        .format(currency=credits_name, new_balance=exc.max_balance), 
+                        color= await ctx.embed_color()
                     )
                     embed.set_thumbnail(url="https://photos.kstj.us/SubmissiveEverlastingStork.png")
                     embed.set_footer(
@@ -359,7 +360,7 @@ class Economy(commands.Cog):
                         amount=credit_amount,
                         new_balance=await bank.get_balance(author),
                         pos=pos,
-                    )
+                    ), color= await ctx.embed_color()
                 )
                 embed.set_thumbnail(url="https://photos.kstj.us/SubmissiveEverlastingStork.png")
                 embed.set_footer(
@@ -370,7 +371,7 @@ class Economy(commands.Cog):
                 dtime = self.display_time(next_payday - cur_time)
                 embed = discord.Embed(
                     description="\N{CROSS MARK} {author.mention} Too soon.\n\n For your next payday you have to wait {time}."
-                    .format(author=author, time=dtime)
+                    .format(author=author, time=dtime), color= await ctx.embed_color()
                 )
                 embed.set_footer(
                     text="{}".format(embed_tagline)
@@ -460,7 +461,7 @@ class Economy(commands.Cog):
         await self.slot_machine(author, channel, bid)
 
     @staticmethod
-    async def slot_machine(author, channel, bid):
+    async def slot_machine(author, channel, bid,):
         default_reel = deque(cast(Iterable, SMReel))
         reels = []
         for i in range(3):
@@ -473,7 +474,7 @@ class Economy(commands.Cog):
             (reels[0][2], reels[1][2], reels[2][2]),
         )
 
-        slot = "~~\n~~"  # Mobile friendly
+        slot = "\n\n"  # Mobile friendly
         for i, row in enumerate(rows):  # Let's build the slot to show
             sign = "  "
             if i == 1:
@@ -503,18 +504,18 @@ class Economy(commands.Cog):
             except errors.BalanceTooHigh as exc:
                 await bank.set_balance(author, exc.max_balance)
                 embed = discord.Embed(
-                        title="SLOTS \N{SLOT MACHINE}", description="You've reached the **maximum** amount of {currency}!\n\n "
-                            "Please spend some more \N{GRIMACING FACE}\n{old_balance} -> {new_balance}!"
+                        title="Imperial Casino \N{SLOT MACHINE}", description="You've reached the **maximum** amount of {currency}!\n\n "
+                            "Please spend some more \N{GRIMACING FACE}\n\n**{old_balance}** -> **{new_balance}**!"
                         .format(
                         currency=await bank.get_currency_name(getattr(channel, "guild", None)),
                         old_balance=then,
-                        new_balance=exc.max_balance,
-                    )
+                        new_balance=exc.max_balance
+                    ), color= 0x49ff00
                 )
                 embed.set_thumbnail(url="https://photos.kstj.us/SubmissiveEverlastingStork.png")
                 embed.set_footer(
-                    text="Powered by Imperial Credits! If found report rebel scum to your nearest stormtrooper",
-                        )
+                    text="Powered by Imperial Credits! If found report rebel scum to your nearest stormtrooper"
+                )
                 await channel.send(embed=embed)
                 return
                     
@@ -524,20 +525,27 @@ class Economy(commands.Cog):
             await bank.withdraw_credits(author, bid)
             now = then - bid
             phrase = _("Nothing!")
-        await channel.send(
-            (
-                "{slot}\n{author.mention} {phrase}\n\n"
-                + _("Your bid: {amount}")
-                + "\n{old_balance} → {new_balance}!"
-            ).format(
-                slot=slot,
+        embed = discord.Embed(
+            title="Imperial Casino \N{SLOT MACHINE}",
+            description="{slot}".format(slot=slot),
+            color = 0x49ff00
+        )
+        embed.add_field(
+            name="Slot Payout",
+            value="{author.mention} **{phrase}**\n\n"
+                "Your bid: **{amount}**"
+                "\n\n**{old_balance}** → **{new_balance}**!".format(
                 author=author,
                 phrase=phrase,
                 amount=bid,
                 old_balance=then,
-                new_balance=now,
-            )
+                new_balance=now,)
         )
+        embed.set_thumbnail(url="https://photos.kstj.us/SubmissiveEverlastingStork.png")
+        embed.set_footer(
+            text="Powered by Imperial Credits! If found report rebel scum to your nearest stormtrooper"
+                )
+        await channel.send(embed=embed)
 
     @commands.group()
     @guild_only_check()
