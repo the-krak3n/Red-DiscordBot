@@ -241,7 +241,6 @@ def init_events(bot, cli_flags):
             )
         else:
             log.exception(type(error).__name__, exc_info=error)
-        
 
     @bot.event
     async def on_message(message):
@@ -302,15 +301,14 @@ def init_events(bot, cli_flags):
         await _guild_added(guild)
 
     @bot.event
-    async def on_guild_leave(guild: discord.Guild):
+    async def on_guild_remove(guild: discord.Guild):
         # Clean up any unneeded checks
+        bot.counter["guild_remove"] += 1
         disabled_commands = await bot.db.guild(guild).disabled_commands()
         for command_name in disabled_commands:
             command_obj = bot.get_command(command_name)
             if command_obj is not None:
                 command_obj.enable_in(guild)
-        bot.counter["guild_remove"] += 1
-
 
 def _get_startup_screen_specs():
     """Get specs for displaying the startup screen on stdout.
