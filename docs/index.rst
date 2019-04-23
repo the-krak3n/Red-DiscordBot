@@ -30,6 +30,7 @@ Welcome to Red - Discord Bot's documentation!
 
     guide_migration
     guide_cog_creation
+    framework_apikeys
     guide_data_conversion
     framework_bank
     framework_bot
