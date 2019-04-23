@@ -1183,7 +1183,15 @@ class Audio(commands.Cog):
         player = lavalink.get_player(ctx.guild.id)
         guild_data = await self.config.guild(ctx.guild).all()
         if type(query) is not list:
+<<<<<<< HEAD
             if not query.startswith("http"):
+=======
+            if not (
+                query.startswith("http")
+                or query.startswith("localtracks")
+                or query.startswith("ytsearch:")
+            ):
+>>>>>>> bb8ce43... [Audio] Track search and append fixes (#2591)
                 query = f"ytsearch:{query}"
             tracks = await player.get_tracks(query)
             if not tracks:
@@ -1401,7 +1409,7 @@ class Audio(commands.Cog):
         pass
 
     @playlist.command(name="append")
-    async def _playlist_append(self, ctx, playlist_name, *url):
+    async def _playlist_append(self, ctx, playlist_name, *, url):
         """Add a track URL, playlist link, or quick search to a playlist.
 
         The track(s) will be appended to the end of the playlist.
@@ -2014,7 +2022,6 @@ class Audio(commands.Cog):
                 tracklist.append(track_obj)
             self._play_lock(ctx, False)
         elif not query.startswith("http"):
-            query = " ".join(query)
             query = "ytsearch:{}".format(query)
             search = True
             tracks = await player.get_tracks(query)
