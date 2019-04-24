@@ -1183,15 +1183,11 @@ class Audio(commands.Cog):
         player = lavalink.get_player(ctx.guild.id)
         guild_data = await self.config.guild(ctx.guild).all()
         if type(query) is not list:
-<<<<<<< HEAD
-            if not query.startswith("http"):
-=======
             if not (
                 query.startswith("http")
                 or query.startswith("localtracks")
                 or query.startswith("ytsearch:")
             ):
->>>>>>> bb8ce43... [Audio] Track search and append fixes (#2591)
                 query = f"ytsearch:{query}"
             tracks = await player.get_tracks(query)
             if not tracks:
