@@ -651,7 +651,7 @@ class Core(commands.Cog, CoreLogic):
 
     @commands.group(name="set")
     async def _set(self, ctx: commands.Context):
-        """Changes Red's settings"""
+        """Changes BB-8's settings"""
         if ctx.invoked_subcommand is None:
             if ctx.guild:
                 guild = ctx.guild
@@ -675,7 +675,6 @@ class Core(commands.Cog, CoreLogic):
                 f"{ctx.bot.user.name} Settings:\n\n"
                 f"Prefixes: {prefix_string}\n"
                 f"{guild_settings}"
-                f"Locale: {locale}"
             )
             await ctx.send(box(settings))
 
@@ -913,7 +912,7 @@ class Core(commands.Cog, CoreLogic):
     @_set.command(aliases=["prefixes"])
     @checks.is_owner()
     async def prefix(self, ctx: commands.Context, *prefixes: str):
-        """Sets Red's global prefix(es)"""
+        """Sets BB-8's global prefix(es)"""
         if not prefixes:
             await ctx.send_help()
             return
