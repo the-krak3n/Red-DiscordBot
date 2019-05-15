@@ -31,7 +31,6 @@ Welcome to Red - Discord Bot's documentation!
     guide_migration
     guide_cog_creation
     framework_apikeys
-    guide_data_conversion
     framework_bank
     framework_bot
     framework_checks
@@ -46,6 +45,11 @@ Welcome to Red - Discord Bot's documentation!
     framework_rpc
     framework_utils
 
+.. toctree::
+    :maxdepth: 2
+    :caption: Changelogs:
+
+    changelog_3_1_0
 
 
 Indices and tables
