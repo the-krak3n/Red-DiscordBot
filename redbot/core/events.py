@@ -175,6 +175,7 @@ def init_events(bot, cli_flags):
 
     @bot.event
     async def on_command_error(ctx, error, unhandled_by_cog=False):
+
         if not unhandled_by_cog:
             if hasattr(ctx.command, "on_error"):
                 return
@@ -272,8 +273,7 @@ def init_events(bot, cli_flags):
                     "clock. Any time sensitive code may fail.",
                     diff,
                 )
-            bot.checked_time_accuracy = discord_now  
-        if message.author.id == bot.user.id:
+            bot.checked_time_accuracy = discord_now
 
     @bot.event
     async def on_resumed():
@@ -304,7 +304,6 @@ def init_events(bot, cli_flags):
     async def on_guild_join(guild: discord.Guild):
         await _guild_added(guild)
 
-
     @bot.event
     async def on_guild_available(guild: discord.Guild):
         # We need to check guild-disabled commands here since some cogs
@@ -319,6 +318,7 @@ def init_events(bot, cli_flags):
             command_obj = bot.get_command(command_name)
             if command_obj is not None:
                 command_obj.enable_in(guild)
+
     @bot.event
     async def on_cog_add(cog: commands.Cog):
         confs = get_latest_confs()
