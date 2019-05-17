@@ -210,7 +210,6 @@ def init_events(bot, cli_flags):
                 traceback.format_exception(type(error), error, error.__traceback__)
             )
             bot._last_exception = exception_log
-            bot.counter['cmd_error'] += 1
             await ctx.send(inline(message))
         elif isinstance(error, commands.CommandNotFound):
             fuzzy_commands = await fuzzy_command_search(ctx)
@@ -275,7 +274,6 @@ def init_events(bot, cli_flags):
                 )
             bot.checked_time_accuracy = discord_now  
         if message.author.id == bot.user.id:
-            bot.counter["msg_sent"] += 1
 
     @bot.event
     async def on_resumed():
@@ -305,7 +303,6 @@ def init_events(bot, cli_flags):
     @bot.event
     async def on_guild_join(guild: discord.Guild):
         await _guild_added(guild)
-        bot.counter["guild_join"] += 1
 
 
     @bot.event
@@ -315,15 +312,13 @@ def init_events(bot, cli_flags):
         await _guild_added(guild)
 
     @bot.event
-    async def on_guild_remove(guild: discord.Guild):
+    async def on_guild_leave(guild: discord.Guild):
         # Clean up any unneeded checks
-        bot.counter["guild_remove"] += 1
         disabled_commands = await bot.db.guild(guild).disabled_commands()
         for command_name in disabled_commands:
             command_obj = bot.get_command(command_name)
             if command_obj is not None:
                 command_obj.enable_in(guild)
-
     @bot.event
     async def on_cog_add(cog: commands.Cog):
         confs = get_latest_confs()
