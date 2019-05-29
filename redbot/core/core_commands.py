@@ -8,6 +8,9 @@ import logging
 import os
 import pathlib
 import sys
+import platform
+import getpass
+import pip
 import tarfile
 import traceback
 from collections import namedtuple
@@ -30,7 +33,7 @@ from redbot.core import (
     i18n,
 )
 from .utils.predicates import MessagePredicate
-from .utils.chat_formatting import pagify, box, inline
+from .utils.chat_formatting import humanize_timedelta, pagify, box, inline
 
 if TYPE_CHECKING:
     from redbot.core.bot import Red
@@ -41,6 +44,8 @@ log = logging.getLogger("red")
 
 
 _ = i18n.Translator("Core", __file__)
+
+TokenConverter = commands.get_dict_converter(delims=[" ", ",", ";"])
 
 
 class CoreLogic:
@@ -333,28 +338,12 @@ class Core(commands.Cog, CoreLogic):
     async def uptime(self, ctx: commands.Context):
         """Shows Red's uptime"""
         since = ctx.bot.uptime.strftime("%Y-%m-%d %H:%M:%S")
-        passed = self.get_bot_uptime()
-        await ctx.send(_("Been up for: **{}** (since {} UTC)").format(passed, since))
-
-    def get_bot_uptime(self, *, brief: bool = False):
-        # Courtesy of Danny
-        now = datetime.datetime.utcnow()
-        delta = now - self.bot.uptime
-        hours, remainder = divmod(int(delta.total_seconds()), 3600)
-        minutes, seconds = divmod(remainder, 60)
-        days, hours = divmod(hours, 24)
-
-        if not brief:
-            if days:
-                fmt = _("{d} days, {h} hours, {m} minutes, and {s} seconds")
-            else:
-                fmt = _("{h} hours, {m} minutes, and {s} seconds")
-        else:
-            fmt = _("{h}h {m}m {s}s")
-            if days:
-                fmt = _("{d}d ") + fmt
-
-        return fmt.format(d=days, h=hours, m=minutes, s=seconds)
+        delta = datetime.datetime.utcnow() - self.bot.uptime
+        await ctx.send(
+            _("Been up for: **{}** (since {} UTC)").format(
+                humanize_timedelta(timedelta=delta), since
+            )
+        )
 
     @commands.group()
     async def embedset(self, ctx: commands.Context):
@@ -1058,7 +1047,7 @@ class Core(commands.Cog, CoreLogic):
 
     @_set.command()
     @checks.is_owner()
-    async def api(self, ctx: commands.Context, service: str, *tokens: commands.converter.APIToken):
+    async def api(self, ctx: commands.Context, service: str, *, tokens: TokenConverter):
         """Set various external API tokens.
         
         This setting will be asked for by some 3rd party cogs and some core cogs.
@@ -1071,8 +1060,7 @@ class Core(commands.Cog, CoreLogic):
         """
         if ctx.channel.permissions_for(ctx.me).manage_messages:
             await ctx.message.delete()
-        entry = {k: v for t in tokens for k, v in t.items()}
-        await ctx.bot.db.api_tokens.set_raw(service, value=entry)
+        await ctx.bot.db.api_tokens.set_raw(service, value=tokens)
         await ctx.send(_("`{service}` API tokens have been set.").format(service=service))
 
     @commands.group()
@@ -1460,6 +1448,59 @@ class Core(commands.Cog, CoreLogic):
         data_dir = Path(basic_config["DATA_PATH"])
         msg = _("Data path: {path}").format(path=data_dir)
         await ctx.send(box(msg))
+
+    @commands.command(hidden=True)
+    @checks.is_owner()
+    async def debuginfo(self, ctx: commands.Context):
+        """Shows debug information useful for debugging.."""
+
+        if sys.platform == "linux":
+            import distro
+
+        IS_WINDOWS = os.name == "nt"
+        IS_MAC = sys.platform == "darwin"
+        IS_LINUX = sys.platform == "linux"
+
+        pyver = "{}.{}.{} ({})".format(*sys.version_info[:3], platform.architecture()[0])
+        pipver = pip.__version__
+        redver = red_version_info
+        dpy_version = discord.__version__
+        if IS_WINDOWS:
+            os_info = platform.uname()
+            osver = "{} {} (version {})".format(os_info.system, os_info.release, os_info.version)
+        elif IS_MAC:
+            os_info = platform.mac_ver()
+            osver = "Mac OSX {} {}".format(os_info[0], os_info[2])
+        elif IS_LINUX:
+            os_info = distro.linux_distribution()
+            osver = "{} {}".format(os_info[0], os_info[1]).strip()
+        else:
+            osver = "Could not parse OS, report this on Github."
+        user_who_ran = getpass.getuser()
+
+        if await ctx.embed_requested():
+            e = discord.Embed(color=await ctx.embed_colour())
+            e.title = "Debug Info for Red"
+            e.add_field(name="Red version", value=redver, inline=True)
+            e.add_field(name="Python version", value=pyver, inline=True)
+            e.add_field(name="Discord.py version", value=dpy_version, inline=True)
+            e.add_field(name="Pip version", value=pipver, inline=True)
+            e.add_field(name="System arch", value=platform.machine(), inline=True)
+            e.add_field(name="User", value=user_who_ran, inline=True)
+            e.add_field(name="OS version", value=osver, inline=False)
+            await ctx.send(embed=e)
+        else:
+            info = (
+                "Debug Info for Red\n\n"
+                + "Red version: {}\n".format(redver)
+                + "Python version: {}\n".format(pyver)
+                + "Discord.py version: {}\n".format(dpy_version)
+                + "Pip version: {}\n".format(pipver)
+                + "System arch: {}\n".format(platform.machine())
+                + "User: {}\n".format(user_who_ran)
+                + "OS version: {}\n".format(osver)
+            )
+            await ctx.send(box(info))
 
     @commands.group()
     @checks.is_owner()
