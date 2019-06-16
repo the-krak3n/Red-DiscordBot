@@ -333,6 +333,8 @@ class Core(commands.Cog, CoreLogic):
             embed.add_field(name="About this instance", value=custom_info, inline=False)
         embed.add_field(name="\N{PUSHPIN}""About {}".format(ctx.bot.user.name), value=about, inline=False)
 
+        embed.set_image(url="https://photos.kstj.us/WobblySiennaSponge.png")
+
         embed.set_footer(
             text="Bringing joy since 02 Jan 2016 (over {} days ago!)".format(days_since),
             icon_url="https://cdn.discordapp.com/icons/133049272517001216/83b39ff510bb7c3f5aeb51270af09ad3.webp"
