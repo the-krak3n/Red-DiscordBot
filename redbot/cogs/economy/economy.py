@@ -263,7 +263,6 @@ class Economy(commands.Cog):
         author = ctx.author
         guild = ctx.guild
         embed_tagline = await self.config.embed_tagline()
-        url = await self.config.guild(ctx.guild).thumbnail()
 
         cur_time = calendar.timegm(ctx.message.created_at.utctimetuple())
         credits_name = await bank.get_currency_name(ctx.guild)
