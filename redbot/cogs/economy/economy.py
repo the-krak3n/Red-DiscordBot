@@ -263,6 +263,7 @@ class Economy(commands.Cog):
         author = ctx.author
         guild = ctx.guild
         embed_tagline = await self.config.embed_tagline()
+        depamount = random.randint(1, 1000)
 
         cur_time = calendar.timegm(ctx.message.created_at.utctimetuple())
         credits_name = await bank.get_currency_name(ctx.guild)
@@ -270,7 +271,7 @@ class Economy(commands.Cog):
             next_payday = await self.config.user(author).next_payday()
             if cur_time >= next_payday:
                 try:
-                    await bank.deposit_credits(author, await self.config.PAYDAY_CREDITS())
+                    await bank.deposit_credits(author, depamount)
                 except errors.BalanceTooHigh as exc:
                     await bank.set_balance(author, exc.max_balance)
                     embed = discord.Embed(
@@ -298,7 +299,7 @@ class Economy(commands.Cog):
                         .format(
                         author=author,
                         currency=credits_name,
-                        amount=await self.config.PAYDAY_CREDITS(),
+                        amount= depamount,
                         new_balance=await bank.get_balance(author),
                         pos=pos,
                     ), color= await ctx.embed_color()
@@ -329,7 +330,7 @@ class Economy(commands.Cog):
                     if role_credits > credit_amount:
                         credit_amount = role_credits
                 try:
-                    await bank.deposit_credits(author, credit_amount)
+                    await bank.deposit_credits(author, depamount)
                 except errors.BalanceTooHigh as exc:
                     await bank.set_balance(author, exc.max_balance)
                     embed = discord.Embed(
@@ -356,7 +357,7 @@ class Economy(commands.Cog):
                     .format(
                         author=author,
                         currency=credits_name,
-                        amount=credit_amount,
+                        amount=depamount,
                         new_balance=await bank.get_balance(author),
                         pos=pos,
                     ), color= await ctx.embed_color()
