@@ -2,14 +2,15 @@ import calendar
 import logging
 import random
 import re
-from collections import defaultdict, deque
+from collections import defaultdict, deque, namedtuple
 from enum import Enum
-from typing import cast, Iterable
+from typing import cast, Iterable, Union
 
 import discord
 
 from redbot.cogs.bank import check_global_setting_guildowner, check_global_setting_admin
-from redbot.core import Config, bank, commands, errors
+from redbot.cogs.mod.converters import RawUserIds
+from redbot.core import Config, bank, commands, errors, checks
 from redbot.core.i18n import Translator, cog_i18n
 from redbot.core.utils.chat_formatting import box, humanize_number
 from redbot.core.utils.menus import menu, DEFAULT_CONTROLS
@@ -21,6 +22,7 @@ T_ = Translator("Economy", __file__)
 logger = logging.getLogger("red.economy")
 
 NUM_ENC = "\N{COMBINING ENCLOSING KEYCAP}"
+MOCK_MEMBER = namedtuple("Member", "id guild")
 
 
 class SMReel(Enum):
@@ -160,7 +162,10 @@ class Economy(commands.Cog):
 
         bal = await bank.get_balance(user)
         currency = await bank.get_currency_name(ctx.guild)
-
+        max_bal = await bank.get_max_balance(ctx.guild)
+        if bal > max_bal:
+            bal = max_bal
+            await bank.set_balance(user, bal)
         await ctx.send(
             _("{user}'s balance is {num} {currency}").format(
                 user=user.display_name, num=humanize_number(bal), currency=currency
@@ -261,6 +266,87 @@ class Economy(commands.Cog):
         await self.config.embed_tagline.set(embedtagline)
         await ctx.send("Embed tagline set")
     
+
+    @_bank.group(name="prune")
+    @check_global_setting_admin()
+    async def _prune(self, ctx):
+        """Prune bank accounts."""
+        pass
+
+    @_prune.command(name="local")
+    @commands.guild_only()
+    @checks.guildowner()
+    async def _local(self, ctx, confirmation: bool = False):
+        """Prune bank accounts for users no longer in the server."""
+        global_bank = await bank.is_global()
+        if global_bank is True:
+            return await ctx.send(_("This command cannot be used with a global bank."))
+
+        if confirmation is False:
+            await ctx.send(
+                _(
+                    "This will delete all bank accounts for users no longer in this server."
+                    "\nIf you're sure, type "
+                    "`{prefix}bank prune local yes`"
+                ).format(prefix=ctx.prefix)
+            )
+        else:
+            await bank.bank_prune(self.bot, guild=ctx.guild)
+            await ctx.send(
+                _("Bank accounts for users no longer in this server have been deleted.")
+            )
+
+    @_prune.command(name="global")
+    @checks.is_owner()
+    async def _global(self, ctx, confirmation: bool = False):
+        """Prune bank accounts for users who no longer share a server with the bot."""
+        global_bank = await bank.is_global()
+        if global_bank is False:
+            return await ctx.send(_("This command cannot be used with a local bank."))
+
+        if confirmation is False:
+            await ctx.send(
+                _(
+                    "This will delete all bank accounts for users "
+                    "who no longer share a server with the bot."
+                    "\nIf you're sure, type `{prefix}bank prune global yes`"
+                ).format(prefix=ctx.prefix)
+            )
+        else:
+            await bank.bank_prune(self.bot)
+            await ctx.send(
+                _(
+                    "Bank accounts for users who "
+                    "no longer share a server with the bot have been pruned."
+                )
+            )
+
+    @_prune.command(usage="<user> [confirmation=False]")
+    async def user(
+        self, ctx, member_or_id: Union[discord.Member, RawUserIds], confirmation: bool = False
+    ):
+        """Delete the bank account of a specified user."""
+        global_bank = await bank.is_global()
+        if global_bank is False and ctx.guild is None:
+            return await ctx.send(_("This command cannot be used in DMs with a local bank."))
+        try:
+            name = member_or_id.display_name
+            uid = member_or_id.id
+        except AttributeError:
+            name = member_or_id
+            uid = member_or_id
+
+        if confirmation is False:
+            await ctx.send(
+                _(
+                    "This will delete {name}'s bank account."
+                    "\nIf you're sure, type "
+                    "`{prefix}bank prune user {id} yes`"
+                ).format(prefix=ctx.prefix, id=uid, name=name)
+            )
+        else:
+            await bank.bank_prune(self.bot, guild=ctx.guild, user_id=uid)
+            await ctx.send(_("The bank account for {name} has been pruned.").format(name=name))
 
     @guild_only_check()
     @commands.command()
@@ -393,6 +479,7 @@ class Economy(commands.Cog):
         """
         guild = ctx.guild
         author = ctx.author
+        max_bal = await bank.get_max_balance(ctx.guild)
         if top < 1:
             top = 10
         if await bank.is_global() and show_global:
@@ -402,6 +489,9 @@ class Economy(commands.Cog):
             bank_sorted = await bank.get_leaderboard(positions=top, guild=guild)
         try:
             bal_len = len(humanize_number(bank_sorted[0][1]["balance"]))
+            bal_len_max = len(humanize_number(max_bal))
+            if bal_len > bal_len_max:
+                bal_len = bal_len_max
             # first user is the largest we'll see
         except IndexError:
             return await ctx.send(_("There are no accounts in the bank."))
@@ -424,8 +514,12 @@ class Economy(commands.Cog):
                 if await ctx.bot.is_owner(ctx.author):
                     user_id = f"({str(acc[0])})"
                 name = f"{acc[1]['name']} {user_id}"
-            balance = humanize_number(acc[1]["balance"])
 
+            balance = acc[1]["balance"]
+            if balance > max_bal:
+                balance = max_bal
+                await bank.set_balance(MOCK_MEMBER(acc[0], guild), balance)
+            balance = humanize_number(balance)
             if acc[0] != author.id:
                 temp_msg += (
                     f"{f'{humanize_number(pos)}.': <{pound_len+2}} "
@@ -603,7 +697,8 @@ class Economy(commands.Cog):
                         "Slot cooldown: {slot_time}\n"
                         "Payday amount: {payday_amount}\n"
                         "Payday cooldown: {payday_time}\n"
-                        "Amount given at account registration: {register_amount}"
+                        "Amount given at account registration: {register_amount}\n"
+                        "Maximum allowed balance: {maximum_bal}"
                     ).format(
                         slot_min=humanize_number(await conf.SLOT_MIN()),
                         slot_max=humanize_number(await conf.SLOT_MAX()),
@@ -611,6 +706,7 @@ class Economy(commands.Cog):
                         payday_time=humanize_number(await conf.PAYDAY_TIME()),
                         payday_amount=humanize_number(await conf.PAYDAY_CREDITS()),
                         register_amount=humanize_number(await bank.get_default_balance(guild)),
+                        maximum_bal=humanize_number(await bank.get_max_balance(guild)),
                     )
                 )
             )
@@ -682,9 +778,13 @@ class Economy(commands.Cog):
     async def paydayamount(self, ctx: commands.Context, creds: int):
         """Set the amount earned each payday."""
         guild = ctx.guild
-        if creds <= 0 or creds > bank.MAX_BALANCE:
-            await ctx.send(_("Har har so funny."))
-            return
+        max_balance = await bank.get_max_balance(ctx.guild)
+        if creds <= 0 or creds > max_balance:
+            return await ctx.send(
+                _("Amount must be greater than zero and less than {maxbal}.").format(
+                    maxbal=humanize_number(max_balance)
+                )
+            )
         credits_name = await bank.get_currency_name(guild)
         if await bank.is_global():
             await self.config.PAYDAY_CREDITS.set(creds)
@@ -700,9 +800,13 @@ class Economy(commands.Cog):
     async def rolepaydayamount(self, ctx: commands.Context, role: discord.Role, creds: int):
         """Set the amount earned each payday for a role."""
         guild = ctx.guild
-        if creds <= 0 or creds > bank.MAX_BALANCE:
-            await ctx.send(_("Har har so funny."))
-            return
+        max_balance = await bank.get_max_balance(ctx.guild)
+        if creds <= 0 or creds > max_balance:
+            return await ctx.send(
+                _("Amount must be greater than zero and less than {maxbal}.").format(
+                    maxbal=humanize_number(max_balance)
+                )
+            )
         credits_name = await bank.get_currency_name(guild)
         if await bank.is_global():
             await ctx.send(_("The bank must be per-server for per-role paydays to work."))
@@ -719,10 +823,16 @@ class Economy(commands.Cog):
     async def registeramount(self, ctx: commands.Context, creds: int):
         """Set the initial balance for new bank accounts."""
         guild = ctx.guild
-        if creds < 0:
-            creds = 0
+        max_balance = await bank.get_max_balance(ctx.guild)
         credits_name = await bank.get_currency_name(guild)
-        await bank.set_default_balance(creds, guild)
+        try:
+            await bank.set_default_balance(creds, guild)
+        except ValueError:
+            return await ctx.send(
+                _("Amount must be greater than or equal to zero and less than {maxbal}.").format(
+                    maxbal=humanize_number(max_balance)
+                )
+            )
         await ctx.send(
             _("Registering an account will now give {num} {currency}.").format(
                 num=humanize_number(creds), currency=credits_name

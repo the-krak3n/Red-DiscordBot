@@ -91,14 +91,7 @@ community of cog repositories.**
 
 - [Windows](https://red-discordbot.readthedocs.io/en/stable/install_windows.html)
 - [MacOS](https://red-discordbot.readthedocs.io/en/stable/install_linux_mac.html)
-- [Ubuntu](https://red-discordbot.readthedocs.io/en/stable/install_linux_mac.html)
-- [Debian Stretch](https://red-discordbot.readthedocs.io/en/stable/install_linux_mac.html)
-- [CentOS 7](https://red-discordbot.readthedocs.io/en/stable/install_linux_mac.html)
-- [Arch Linux](https://red-discordbot.readthedocs.io/en/stable/install_linux_mac.html)
-- [Raspbian Stretch](https://red-discordbot.readthedocs.io/en/stable/install_linux_mac.html)
-
-Already using **Red** V2? Take a look at the [Data Converter](https://red-discordbot.readthedocs.io/en/v3-develop/cog_dataconverter.html)
-to import your data to V3.
+- [Most major linux distributions](https://red-discordbot.readthedocs.io/en/stable/install_linux_mac.html)
 
 If after reading the guide you are still experiencing issues, feel free to join the
 [Official Discord Server](https://discord.gg/red) and ask in the **#support** channel for help.
