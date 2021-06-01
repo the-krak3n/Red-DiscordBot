@@ -357,7 +357,7 @@ def init_events(bot, cli_flags):
             not bot._checked_time_accuracy
             or (discord_now - timedelta(minutes=60)) > bot._checked_time_accuracy
         ):
-            system_now = datetime.utcnow()
+            system_now = datetime.now()
             diff = abs((discord_now - system_now).total_seconds())
             if diff > 60:
                 log.warning(

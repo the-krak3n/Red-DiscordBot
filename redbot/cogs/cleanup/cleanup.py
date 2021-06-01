@@ -95,7 +95,7 @@ class Cleanup(commands.Cog):
         """
 
         # This isn't actually two weeks ago to allow some wiggle room on API limits
-        two_weeks_ago = datetime.utcnow() - timedelta(days=14, minutes=-5)
+        two_weeks_ago = datetime.now() - timedelta(days=14, minutes=-5)
 
         def message_filter(message):
             return (
