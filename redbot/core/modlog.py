@@ -107,7 +107,7 @@ async def _init(bot: Red):
         except RuntimeError:
             return  # No modlog channel so no point in continuing
 
-        when = datetime.now()
+        when = datetime.now(timezone.utc)
         before = when + timedelta(minutes=1)
         after = when - timedelta(minutes=1)
         await asyncio.sleep(10)  # prevent small delays from causing a 5 minute delay on entry
@@ -144,7 +144,7 @@ async def _init(bot: Red):
         except RuntimeError:
             return  # No modlog channel so no point in continuing
 
-        when = datetime.now()
+        when = datetime.now(timezone.utc)
         before = when + timedelta(minutes=1)
         after = when - timedelta(minutes=1)
         await asyncio.sleep(10)  # prevent small delays from causing a 5 minute delay on entry
