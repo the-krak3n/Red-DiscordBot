@@ -59,7 +59,8 @@ class KickBanMixin(MixinMeta):
                 return inv
         else:  # No existing invite found that is valid
             channels_and_perms = zip(
-                guild.text_channels, map(guild.me.permissions_in, guild.text_channels)
+                guild.text_channels,
+                map(lambda c: c.permissions_for(guild.me), guild.text_channels),
             )
             channel = next(
                 (channel for channel, perms in channels_and_perms if perms.create_instant_invite),
