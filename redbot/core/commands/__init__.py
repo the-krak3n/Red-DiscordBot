@@ -27,7 +27,6 @@ from .converter import (
     parse_timedelta as parse_timedelta,
     NoParseOptional as NoParseOptional,
     UserInputOptional as UserInputOptional,
-    Literal as Literal,
 )
 from .errors import (
     ConversionFailure as ConversionFailure,
