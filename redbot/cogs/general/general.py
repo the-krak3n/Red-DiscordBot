@@ -370,7 +370,7 @@ class General(commands.Cog):
                 "low": _("1 - Low"),
                 "medium": _("2 - Medium"),
                 "high": _("3 - High"),
-                "extreme": _("4 - Extreme"),
+                "highest": _("4 - Extreme"),
             }
 
             features = {
