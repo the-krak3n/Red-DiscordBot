@@ -385,7 +385,7 @@ class CoreLogic:
         scopes = ("bot", "applications.commands") if commands_scope else None
         perms_int = data["invite_perm"]
         permissions = discord.Permissions(perms_int)
-        return discord.utils.oauth_url(app_info.id, permissions, scopes=scopes)
+        return discord.utils.oauth_url(app_info.id, permissions=permissions, scopes=scopes)
 
     @staticmethod
     async def _can_get_invite_url(ctx):
