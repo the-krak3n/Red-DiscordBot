@@ -416,7 +416,7 @@ class Core(commands.commands._RuleDropper, commands.Cog, CoreLogic):
     @commands.command()
     async def info(self, ctx: commands.Context):
         """Shows info about [botname].
-
+        
         See `[p]set custominfo` to customize.
         """
         embed_links = await ctx.embed_requested()
