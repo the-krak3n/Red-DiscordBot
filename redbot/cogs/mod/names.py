@@ -10,6 +10,7 @@ from redbot.core.utils.common_filters import (
 )
 from redbot.core.utils.mod import get_audit_reason
 from .abc import MixinMeta
+from .utils import is_allowed_by_hierarchy
 
 _ = i18n.Translator("Mod", __file__)
 
@@ -53,6 +54,16 @@ class ModInfo(MixinMeta):
                 _(
                     "I do not have permission to rename that member. They may be higher than or "
                     "equal to me in the role hierarchy."
+                )
+            )
+        elif ctx.author != member and not await is_allowed_by_hierarchy(
+            self.bot, self.config, ctx.guild, ctx.author, member
+        ):
+            await ctx.send(
+                _(
+                    "I cannot let you do that. You are "
+                    "not higher than the user in the role "
+                    "hierarchy."
                 )
             )
         else:
@@ -194,9 +205,9 @@ class ModInfo(MixinMeta):
             + 1
         )
 
-        created_on = "<t:{0}:D>\n(<t:{0}:R>)".format(user_created)
+        created_on = "<t:{0}>\n(<t:{0}:R>)".format(user_created)
         if joined_at is not None:
-            joined_on = "<t:{0}:D>\n(<t:{0}:R>)".format(int(joined_at.timestamp()))
+            joined_on = "<t:{0}>\n(<t:{0}:R>)".format(int(joined_at.timestamp()))
         else:
             joined_on = _("Unknown")
 
