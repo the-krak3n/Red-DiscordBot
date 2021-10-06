@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import asyncio
-import json
+import contextlib
 import logging
 import os
 import sys
@@ -16,6 +16,7 @@ _early_init()
 import appdirs
 import click
 
+from redbot import json
 from redbot.core.cli import confirm
 from redbot.core.utils._internal_utils import safe_delete, create_backup as red_create_backup
 from redbot.core import config, data_manager, drivers
@@ -109,13 +110,18 @@ def get_data_dir(instance_name: str):
 
 
 def get_storage_type():
-    storage_dict = {1: "JSON", 2: "PostgreSQL"}
+    storage_dict = {1: "JSON", 2: "PostgreSQL", 3: "RedisJSON", 4: "Bagel"}
     storage = None
     while storage is None:
         print()
         print("Please choose your storage backend (if you're unsure, just choose 1).")
         print("1. JSON (file storage, requires no database).")
         print("2. PostgreSQL (Requires a database server)")
+        print("3. RedisJSON (Requires a redis server with the RedisJSON plugin)")
+        print(
+            "4. Bagel (Requires an instance of the Bagel server: DO NOT USE if you don't know what this is.)"
+        )
+
         storage = input("> ")
         try:
             storage = int(storage)
@@ -171,7 +177,12 @@ def basic_setup():
 
     storage = get_storage_type()
 
-    storage_dict = {1: BackendType.JSON, 2: BackendType.POSTGRES}
+    storage_dict = {
+        1: BackendType.JSON,
+        2: BackendType.POSTGRES,
+        3: BackendType.REDIS,
+        4: BackendType.Bagel,
+    }
     storage_type: BackendType = storage_dict.get(storage, BackendType.JSON)
     default_dirs["STORAGE_TYPE"] = storage_type.value
     driver_cls = drivers.get_driver_class(storage_type)
@@ -205,6 +216,10 @@ def get_target_backend(backend) -> BackendType:
         return BackendType.JSON
     elif backend == "postgres":
         return BackendType.POSTGRES
+    elif backend == "redis":
+        return BackendType.REDIS
+    elif backend == "bagel":
+        return BackendType.Bagel
 
 
 async def do_migration(
@@ -212,16 +227,22 @@ async def do_migration(
 ) -> Dict[str, Any]:
     cur_driver_cls = drivers._get_driver_class_include_old(current_backend)
     new_driver_cls = drivers.get_driver_class(target_backend)
-    cur_storage_details = data_manager.storage_details()
-    new_storage_details = new_driver_cls.get_config_details()
+    try:
+        cur_storage_details = data_manager.storage_details()
+        new_storage_details = new_driver_cls.get_config_details()
 
-    await cur_driver_cls.initialize(**cur_storage_details)
-    await new_driver_cls.initialize(**new_storage_details)
+        await cur_driver_cls.initialize(**cur_storage_details)
+        await new_driver_cls.initialize(**new_storage_details)
 
-    await config.migrate(cur_driver_cls, new_driver_cls)
+        await config.migrate(cur_driver_cls, new_driver_cls)
+    except Exception as e:
+        conversion_log.exception(e, exc_info=e)
+        new_storage_details = None
 
-    await cur_driver_cls.teardown()
-    await new_driver_cls.teardown()
+    with contextlib.suppress(Exception):
+        await cur_driver_cls.teardown()
+    with contextlib.suppress(Exception):
+        await new_driver_cls.teardown()
 
     return new_storage_details
 
@@ -396,7 +417,7 @@ def delete(
 
 @cli.command()
 @click.argument("instance", type=click.Choice(instance_list), metavar="<INSTANCE_NAME>")
-@click.argument("backend", type=click.Choice(["json", "postgres"]))
+@click.argument("backend", type=click.Choice(["json", "postgres", "redis", "bagel"]))
 def convert(instance, backend):
     """Convert data backend of an instance."""
     current_backend = get_current_backend(instance)
@@ -409,13 +430,16 @@ def convert(instance, backend):
     if current_backend == BackendType.MONGOV1:
         raise RuntimeError("Please see the 3.2 release notes for upgrading a bot using mongo.")
     else:
-        new_storage_details = asyncio.run(do_migration(current_backend, target))
+        loop = asyncio.get_event_loop()
+        new_storage_details = loop.run_until_complete(do_migration(current_backend, target))
 
     if new_storage_details is not None:
         default_dirs["STORAGE_TYPE"] = target.value
         default_dirs["STORAGE_DETAILS"] = new_storage_details
         save_config(instance, default_dirs)
-        conversion_log.info(f"Conversion to {target} complete.")
+        conversion_log.info(
+            f"Instance '{instance}' has been converted from {current_backend} to {target}."
+        )
     else:
         conversion_log.info(
             f"Cannot convert {current_backend.value} to {target.value} at this time."

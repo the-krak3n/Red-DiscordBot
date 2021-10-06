@@ -21,10 +21,11 @@ from redbot.core.i18n import (
     set_contextual_locales_from_guild,
 )
 from .utils import AsyncIter
-from .. import __version__ as red_version, version_info as red_version_info, VersionInfo
+from .. import __version__ as red_version, version_info as red_version_info
 from . import commands
 from .config import get_latest_confs
 from .utils._internal_utils import (
+    fetch_last_fork_update,
     fuzzy_command_search,
     format_fuzzy_results,
     expected_version,
@@ -52,16 +53,19 @@ ______         _           ______ _                       _  ______       _
 """
 
 _ = Translator(__name__, __file__)
+UPDATE_COMMAND = "python -m pip install -U --force-reinstall --no-cache git+https://github.com/Drapersniper/Red-DiscordBot.git@V3/edge#egg=Red-DiscordBot[dev]"
 
 
 def init_events(bot, cli_flags):
     @bot.event
     async def on_connect():
+        bot.counter._inc_core_raw("Red_Core", "on_connect")
         if bot._uptime is None:
             log.info("Connected to Discord. Getting ready...")
 
     @bot.event
     async def on_ready():
+        bot.counter._inc_core_raw("Red_Core", "on_ready")
         if bot._uptime is not None:
             return
 
@@ -74,9 +78,9 @@ def init_events(bot, cli_flags):
 
         if app_info.team:
             if bot._use_team_features:
-                bot.owner_ids.update(m.id for m in app_info.team.members)
+                bot._all_owner_ids |= {m.id for m in app_info.team.members}
         elif bot._owner_id_overwrite is None:
-            bot.owner_ids.add(app_info.owner.id)
+            bot._all_owner_ids |= {app_info.owner.id}
         bot._app_owners_fetched = True
 
         try:
@@ -104,7 +108,10 @@ def init_events(bot, cli_flags):
             table_counts.add_row("Unique Users", str(users))
 
         outdated_red_message = ""
+        fork_outdated = False
         rich_outdated_message = ""
+        should_create_fork_task = True
+        fork_url = "https://github.com/Drapersniper/Red-DiscordBot/commits/V3/edge"
         with contextlib.suppress(aiohttp.ClientError, asyncio.TimeoutError):
             pypi_version, py_version_req = await fetch_latest_red_version_info()
             outdated = pypi_version and pypi_version > red_version_info
@@ -172,6 +179,20 @@ def init_events(bot, cli_flags):
                         "#support channel in <https://discord.gg/red>"
                     ).format(py_version=current_python, req_py=py_version_req)
                 outdated_red_message += extra_update
+            try:
+                date, sha = await fetch_last_fork_update()
+            except:
+                sha = None
+            if sha:
+                async with bot._config.all() as global_data:
+                    last_fork_sha = global_data["last_fork_sha"]
+                    should_create_fork_task = global_data["fork_update_toggle"]
+                    if sha != last_fork_sha:
+                        fork_outdated = True
+                        if sha and last_fork_sha:
+                            fork_url = f"https://github.com/Drapersniper/Red-DiscordBot/compare/{last_fork_sha}..{sha}"
+                        global_data["last_fork_sha"] = sha
+                        global_data["last_fork_update"] = date
 
         rich_console = rich.get_console()
         rich_console.print(INTRO, style="red", markup=False, highlight=False)
@@ -200,7 +221,7 @@ def init_events(bot, cli_flags):
         if rich_outdated_message:
             rich_console.print(rich_outdated_message)
 
-        if not bot.owner_ids:
+        if not bot.all_owner_ids:
             # we could possibly exit here in future
             log.warning("Bot doesn't have any owner set!")
 
@@ -208,9 +229,47 @@ def init_events(bot, cli_flags):
         bot._red_ready.set()
         if outdated_red_message:
             await send_to_owners_with_prefix_replaced(bot, outdated_red_message)
+        if should_create_fork_task:
+            if fork_outdated:
+                await bot.send_to_owners(
+                    "Draper's Fork has been updated, changes can be seen here "
+                    + fork_url
+                    + f" to update you can run `{UPDATE_COMMAND}` in your venv."
+                )
+            asyncio.create_task(_fork_update_task())
+
+    async def _fork_update_task():
+
+        while True:
+            fork_url = "https://github.com/Drapersniper/Red-DiscordBot/commits/V3/edge"
+            try:
+                date, sha = await fetch_last_fork_update()
+                if sha:
+                    async with bot._config.all() as global_data:
+                        last_fork_sha = global_data["last_fork_sha"]
+                        last_fork_update = global_data["last_fork_update"]
+                        should_create_fork_task = global_data["fork_update_toggle"]
+                        if last_fork_sha != sha and date > last_fork_update + 3600:
+                            if sha and last_fork_sha:
+                                fork_url = f"https://github.com/Drapersniper/Red-DiscordBot/compare/{last_fork_sha}..{sha}"
+                            if should_create_fork_task:
+                                await bot.send_to_owners(
+                                    "Draper's Fork has been updated, changes can be seen here "
+                                    + fork_url
+                                    + f" to update you can run `{UPDATE_COMMAND}` in your venv."
+                                )
+                                global_data["last_fork_sha"] = sha
+                                global_data["last_fork_update"] = date
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                log.exception("Error running fork update check task.")
+            finally:
+                await asyncio.sleep(600)
 
     @bot.event
     async def on_command_completion(ctx: commands.Context):
+        bot.counter._inc_core_raw("Red_Core", "on_command_completion")
         await bot._delete_delay(ctx)
 
     @bot.event
@@ -249,6 +308,7 @@ def init_events(bot, cli_flags):
             if disabled_message:
                 await ctx.send(disabled_message.replace("{command}", ctx.invoked_with))
         elif isinstance(error, commands.CommandInvokeError):
+            bot.counter._inc_core_raw("Red_Core", "on_command_error_command_invoke_error")
             log.exception(
                 "Exception in command '{}'".format(ctx.command.qualified_name),
                 exc_info=error.original,
@@ -278,6 +338,7 @@ def init_events(bot, cli_flags):
             else:
                 await ctx.send(await format_fuzzy_results(ctx, fuzzy_commands, embed=False))
         elif isinstance(error, commands.BotMissingPermissions):
+            bot.counter._inc_core_raw("Red_Core", "on_command_error_bot_missing_permissions")
             if bin(error.missing.value).count("1") == 1:  # Only one perm missing
                 msg = _("I require the {permission} permission to execute that command.").format(
                     permission=format_perms_list(error.missing)
@@ -345,10 +406,15 @@ def init_events(bot, cli_flags):
                     ).format(type=error.per.name)
             await ctx.send(msg)
         else:
+            bot.counter._inc_core_raw("Red_Core", "on_command_error")
+
             log.exception(type(error).__name__, exc_info=error)
 
     @bot.event
     async def on_message(message):
+        bot.counter._inc_core_raw("Red_Core", "on_message")
+        if not message.guild:
+            bot.counter._inc_core_raw("Red_Core", "on_message_dm")
         await set_contextual_locales_from_guild(bot, message.guild)
 
         await bot.process_commands(message)
@@ -369,6 +435,8 @@ def init_events(bot, cli_flags):
 
     @bot.event
     async def on_command_add(command: commands.Command):
+        bot.counter._inc_core_raw("Red_Core", "on_command_add")
+
         disabled_commands = await bot._config.disabled_commands()
         if command.qualified_name in disabled_commands:
             command.enabled = False
@@ -387,17 +455,20 @@ def init_events(bot, cli_flags):
 
     @bot.event
     async def on_guild_join(guild: discord.Guild):
+        bot.counter._inc_core_raw("Red_Core", "on_guild_join")
         await _guild_added(guild)
 
     @bot.event
     async def on_guild_available(guild: discord.Guild):
         # We need to check guild-disabled commands here since some cogs
         # are loaded prior to `on_ready`.
+        bot.counter._inc_core_raw("Red_Core", "on_guild_available")
         await _guild_added(guild)
 
     @bot.event
-    async def on_guild_leave(guild: discord.Guild):
+    async def on_guild_remove(guild: discord.Guild):
         # Clean up any unneeded checks
+        bot.counter._inc_core_raw("Red_Core", "on_guild_remove")
         disabled_commands = await bot._config.guild(guild).disabled_commands()
         for command_name in disabled_commands:
             command_obj = bot.get_command(command_name)
@@ -406,8 +477,89 @@ def init_events(bot, cli_flags):
 
     @bot.event
     async def on_cog_add(cog: commands.Cog):
+        bot.counter._inc_core_raw("Red_Core", "on_cog_add")
         confs = get_latest_confs()
         for c in confs:
             uuid = c.unique_identifier
             group_data = c.custom_groups
             await bot._config.custom("CUSTOM_GROUPS", c.cog_name, uuid).set(group_data)
+
+    @bot.event
+    async def on_voice_state_update(
+        member: discord.Member, before: discord.VoiceState, after: discord.VoiceState
+    ) -> None:
+        bot.counter._inc_core_raw("Red_Core", "on_voice_state_update")
+
+    @bot.event
+    async def on_message_edit(_prior, message):
+        bot.counter._inc_core_raw("Red_Core", "on_message_edit")
+
+    @bot.event
+    async def on_user_update(before: discord.User, after: discord.User):
+        bot.counter._inc_core_raw("Red_Core", "on_user_update")
+
+    @bot.event
+    async def on_member_update(before: discord.Member, after: discord.Member):
+        bot.counter._inc_core_raw("Red_Core", "on_member_update")
+
+    @bot.event
+    async def on_member_join(member: discord.Member):
+        bot.counter._inc_core_raw("Red_Core", "on_member_join")
+
+    @bot.event
+    async def on_red_audio_track_start(guild: discord.Guild, track, requester: discord.Member):
+        bot.counter._inc_core_raw("Red_Core", "on_red_audio_track_start")
+
+    @bot.event
+    async def on_red_audio_queue_end(guild: discord.Guild, track, requester: discord.Member):
+        bot.counter._inc_core_raw("Red_Core", "on_red_audio_queue_end")
+
+    @bot.event
+    async def on_red_audio_track_end(guild: discord.Guild, track, requester: discord.Member):
+        bot.counter._inc_core_raw("Red_Core", "on_red_audio_track_end")
+
+    @bot.event
+    async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+        bot.counter._inc_core_raw("Red_Core", "on_raw_reaction_add")
+
+    @bot.event
+    async def on_trivia_end(session):
+        bot.counter._inc_core_raw("Red_Core", "on_trivia_end")
+
+    @bot.event
+    async def on_filter_message_delete(message, hits):
+        bot.counter._inc_core_raw("Red_Core", "on_filter_message_delete")
+
+
+def _get_startup_screen_specs():
+    """Get specs for displaying the startup screen on stdout.
+
+    This is so we don't get encoding errors when trying to print unicode
+    emojis to stdout (particularly with Windows Command Prompt).
+
+    Returns
+    -------
+    `tuple`
+        Tuple in the form (`str`, `str`, `bool`) containing (in order) the
+        on symbol, off symbol and whether or not the border should be pure ascii.
+
+    """
+    encoder = codecs.getencoder(sys.stdout.encoding)
+    check_mark = "\N{SQUARE ROOT}"
+    try:
+        encoder(check_mark)
+    except UnicodeEncodeError:
+        on_symbol = "[X]"
+        off_symbol = "[ ]"
+    else:
+        on_symbol = check_mark
+        off_symbol = "X"
+
+    try:
+        encoder("┌┐└┘─│")  # border symbols
+    except UnicodeEncodeError:
+        ascii_border = True
+    else:
+        ascii_border = False
+
+    return on_symbol, off_symbol, ascii_border

@@ -1,12 +1,14 @@
 import abc
 import enum
-from typing import Tuple, Dict, Any, Union, List, AsyncIterator, Type
+from typing import Tuple, Dict, Any, Union, List, AsyncIterator, Type, Optional
 
 import rich.progress
 
 from redbot.core.utils._internal_utils import RichIndefiniteBarColumn
 
 __all__ = ["BaseDriver", "IdentifierData", "ConfigCategory"]
+
+from redbot.core.drivers.log import log
 
 
 class ConfigCategory(str, enum.Enum):
@@ -135,6 +137,29 @@ class IdentifierData:
             self.is_custom,
         )
 
+    def __gt__(self, other) -> bool:
+        if not isinstance(other, IdentifierData):
+            return NotImplemented
+
+        self_tup = self.to_tuple()
+        other_tup = other.to_tuple()
+        return self_tup == other_tup[: len(self_tup)] and len(self_tup) != len(other_tup)
+
+    def __lt__(self, other) -> bool:
+        if not isinstance(other, IdentifierData):
+            return NotImplemented
+        return other > self
+
+    def __ge__(self, other) -> bool:
+        if not isinstance(other, IdentifierData):
+            return NotImplemented
+        return self > other or self == other
+
+    def __le__(self, other) -> bool:
+        if not isinstance(other, IdentifierData):
+            return NotImplemented
+        return self < other or self == other
+
     def add_identifier(self, *identifier: str) -> "IdentifierData":
         if not all(isinstance(i, str) for i in identifier):
             raise ValueError("Identifiers must be strings.")
@@ -149,12 +174,48 @@ class IdentifierData:
             is_custom=self.is_custom,
         )
 
+    def get_parent(self) -> Tuple[str, "IdentifierData"]:
+        identifiers = self.identifiers
+        primary_key = self.primary_key
+        if identifiers:
+            popped = identifiers[-1]
+            identifiers = identifiers[:-1]
+        elif primary_key:
+            popped = primary_key[-1]
+            primary_key = primary_key[:-1]
+        else:
+            raise IndexError("cannot retreive parent of category")
+
+        return (
+            popped,
+            IdentifierData(
+                self.cog_name,
+                self.uuid,
+                self.category,
+                primary_key,
+                identifiers,
+                self.primary_key_len,
+                is_custom=self.is_custom,
+            ),
+        )
+
     def to_tuple(self) -> Tuple[str, ...]:
         return tuple(
             filter(
                 None,
                 (self.cog_name, self.uuid, self.category, *self.primary_key, *self.identifiers),
             )
+        )
+
+    def to_dict(self) -> Dict[str, Union[str, int, List[str], bool]]:
+        return dict(
+            cog_name=self._cog_name,
+            uuid=self._uuid,
+            category=self._category,
+            primary_key=self._primary_key,
+            identifiers=self._identifiers,
+            primary_key_len=self.primary_key_len,
+            is_custom=self.is_custom,
         )
 
 
@@ -378,7 +439,9 @@ class BaseDriver(abc.ABC):
     async def import_data(
         self, cog_data: List[Tuple[str, Dict[str, Any]]], custom_group_data: Dict[str, int]
     ) -> None:
+        log.info(f"Converting Cog: {self.cog_name}")
         for category, all_data in cog_data:
+            log.info(f"Converting cog category: {category}")
             splitted_pkey = self._split_primary_key(category, custom_group_data, all_data)
             for pkey, data in splitted_pkey:
                 ident_data = IdentifierData(

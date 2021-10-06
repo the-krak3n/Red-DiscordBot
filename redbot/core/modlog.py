@@ -361,6 +361,7 @@ class Case:
             self.last_known_username = f"{self.user.name}#{self.user.discriminator}"
 
         await _config.custom(_CASES, str(self.guild.id), str(self.case_number)).set(self.to_json())
+        self.bot.counter._inc_core_raw("Red_Core", "on_modlog_case_edit")
         self.bot.dispatch("modlog_case_edit", self)
         if not self.message:
             return
@@ -617,14 +618,7 @@ class Case:
         if message is None:
             message_id = data.get("message")
             if message_id is not None:
-                message = discord.utils.get(bot.cached_messages, id=message_id)
-                if message is None:
-                    try:
-                        message = await mod_channel.fetch_message(message_id)
-                    except discord.HTTPException:
-                        message = None
-            else:
-                message = None
+                message = mod_channel.get_partial_message(message_id)
 
         user_objects = {"user": None, "moderator": None, "amended_by": None}
         for user_key in tuple(user_objects):
@@ -974,7 +968,7 @@ async def create_case(
         )
         await _config.custom(_CASES, str(guild.id), str(next_case_number)).set(case.to_json())
         await _config.guild(guild).latest_case_number.set(next_case_number)
-
+    bot.counter._inc_core_raw("Red_Core", "on_modlog_case_create")
     await set_contextual_locales_from_guild(bot, guild)
     bot.dispatch("modlog_case_create", case)
     try:

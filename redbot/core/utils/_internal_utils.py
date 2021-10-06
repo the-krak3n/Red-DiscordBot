@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import collections.abc
 import contextlib
-import json
+import copy
 import logging
+import math
 import os
 import re
 import shutil
@@ -13,30 +14,35 @@ import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import (
+    Any,
     AsyncIterable,
     AsyncIterator,
     Awaitable,
     Callable,
+    Dict,
     Generator,
     Iterable,
     Iterator,
     List,
+    NoReturn,
     Optional,
     Union,
     TypeVar,
     TYPE_CHECKING,
     Tuple,
     cast,
+    final,
 )
 
 import aiohttp
 import discord
 import pkg_resources
+from discord.ext.commands import Cog, check
 from fuzzywuzzy import fuzz, process
 from rich.progress import ProgressColumn
 from rich.progress_bar import ProgressBar
 
-from redbot import VersionInfo
+from redbot import VersionInfo, json
 from redbot.core import data_manager
 from redbot.core.utils.chat_formatting import box
 
@@ -47,6 +53,7 @@ if TYPE_CHECKING:
 main_log = logging.getLogger("red")
 
 __all__ = (
+    "timed_unsu",
     "safe_delete",
     "fuzzy_command_search",
     "format_fuzzy_results",
@@ -55,11 +62,18 @@ __all__ = (
     "send_to_owners_with_prefix_replaced",
     "expected_version",
     "fetch_latest_red_version_info",
+    "_is_unsafe_on_strict_config",
+    "is_sudo_enabled",
+    "fetch_last_fork_update",
     "deprecated_removed",
     "RichIndefiniteBarColumn",
+    "is_sudo_enabled",
 )
 
 _T = TypeVar("_T")
+
+UTF8_RE = re.compile(r"^[\U00000000-\U0010FFFF]*$")
+MIN_INT, MAX_INT = 1 - (2 ** 64), (2 ** 64) - 1
 
 
 def safe_delete(pth: Path):
@@ -320,9 +334,9 @@ def expected_version(current: str, expected: str) -> bool:
 
 async def fetch_latest_red_version_info() -> Tuple[Optional[VersionInfo], Optional[str]]:
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(json_serialize=json.dumps) as session:
             async with session.get("https://pypi.org/pypi/Red-DiscordBot/json") as r:
-                data = await r.json()
+                data = await r.json(loads=json.loads)
     except (aiohttp.ClientError, asyncio.TimeoutError):
         return None, None
     else:
@@ -330,6 +344,283 @@ async def fetch_latest_red_version_info() -> Tuple[Optional[VersionInfo], Option
         required_python = data["info"]["requires_python"]
 
         return release, required_python
+
+
+async def fetch_last_fork_update() -> Tuple[Optional[int], Optional[str]]:
+    try:
+        async with aiohttp.ClientSession(json_serialize=json.dumps) as session:
+            async with session.get(
+                "https://api.github.com/repos/Drapersniper/Red-DiscordBot/commits"
+            ) as r:
+                if r.status != 200:
+                    return None, None
+                data = await r.json(loads=json.loads)
+    except (aiohttp.ClientError, asyncio.TimeoutError):
+        return None, None
+    else:
+        date = (
+            datetime.strptime(data[0]["commit"]["committer"]["date"], "%Y-%m-%dT%H:%M:%SZ")
+            - datetime(1970, 1, 1)
+        ).total_seconds()
+        sha = data[0]["sha"]
+        return int(date), sha
+
+
+def _is_unsafe_on_strict_config(data: Any) -> bool:
+    _type = type(data)
+    if _type not in {dict, list, str, int, float}:
+        return True
+    if _type is dict:
+        for k, v in data.items():
+            if _is_unsafe_on_strict_config(k) or _is_unsafe_on_strict_config(v):
+                return True
+    if _type is list:
+        for i in data:
+            if _is_unsafe_on_strict_config(i):
+                return True
+    if _type is str and not UTF8_RE.match(data):
+        return True
+    if _type is int:
+        if not (MIN_INT < data < MAX_INT):
+            return True
+    if _type is float:
+        if math.isnan(data) or math.isinf(data):
+            return True
+
+
+@final
+class ProxyCounter:
+    __slots__ = ("__counters",)
+
+    def __init__(self):
+        self.__counters: Dict[str, Dict[str, int]] = {}
+
+    def register_counters(self, cog: Cog, *counters: str) -> None:
+        self.register_counters_raw(cog.qualified_name, *counters)
+
+    def register_counters_raw(self, cog_qualified_name: str, *counters: str) -> None:
+        if not type(cog_qualified_name) is str:
+            raise TypeError(
+                f"Expected cog_qualified_name to be a string, received {cog_qualified_name.__class__.__name__} instead."
+            )
+        if not all(type(counter) is str for counter in counters):
+            raise TypeError("Expected counter to be a string.")
+        if cog_qualified_name.lower().startswith("red_"):
+            raise RuntimeError("You cannot add counters to the 'red_' namespace.")
+        if cog_qualified_name not in self.__counters:
+            self.__counters[cog_qualified_name] = {}
+        for counter in counters:
+            counter = str(counter)
+            if counter not in self.__counters[cog_qualified_name]:
+                self.__counters[cog_qualified_name][counter] = 0
+
+    def _register_core_counters_raw(self, cog_qualified_name: str, *counters: str):
+        if not type(cog_qualified_name) is str:
+            raise TypeError(
+                f"Expected cog_qualified_name to be a string, received {cog_qualified_name.__class__.__name__} instead."
+            )
+        if not all(type(counter) is str for counter in counters):
+            raise TypeError("Expected counter to be a string.")
+        if not cog_qualified_name.lower().startswith("red_"):
+            raise RuntimeError(
+                "This private method should only be used to register cogs to the 'red_'."
+            )
+        if cog_qualified_name not in self.__counters:
+            self.__counters[cog_qualified_name] = {}
+        for counter in counters:
+            counter = str(counter)
+            if counter not in self.__counters[cog_qualified_name]:
+                self.__counters[cog_qualified_name][counter] = 0
+
+    def unregister_counter(self, cog: Cog, counter: str) -> None:
+        self.unregister_counter_raw(cog.qualified_name, counter)
+
+    def unregister_counter_raw(self, cog_qualified_name: str, counter: str) -> None:
+        if not type(cog_qualified_name) is str:
+            raise TypeError(
+                f"Expected cog_qualified_name to be a string, received {cog_qualified_name.__class__.__name__} instead."
+            )
+        if not type(counter) is str:
+            raise TypeError(
+                f"Expected counter to be a string, received {counter.__class__.__name__} instead."
+            )
+        if not self.__contains__((cog_qualified_name, counter)):
+            raise KeyError(f"'{counter}' hasn't been registered under '{cog_qualified_name}'.")
+        if cog_qualified_name.lower().startswith("red_"):
+            raise RuntimeError("You cannot removed counters added to the 'red_' namespace.")
+        del self.__counters[cog_qualified_name][counter]
+
+    def get(self, cog: Cog, counter: str) -> int:
+        return self.get_raw(cog.qualified_name, counter)
+
+    def get_raw(self, cog_qualified_name: str, counter: str) -> int:
+        return self.__getitem__(
+            (
+                cog_qualified_name,
+                counter,
+            )
+        )
+
+    def inc(self, cog: Cog, counter: str, by: int = 1) -> int:
+        return self.inc_raw(cog.qualified_name, counter, by=by)
+
+    def inc_raw(self, cog_qualified_name: str, counter: str, by: int = 1) -> int:
+        if not type(cog_qualified_name) is str:
+            raise TypeError(
+                f"Expected cog_qualified_name to be a string, received {cog_qualified_name.__class__.__name__} instead."
+            )
+        if not type(counter) is str:
+            raise TypeError(
+                f"Expected counter to be a string, received {counter.__class__.__name__} instead."
+            )
+        if not self.__contains__((cog_qualified_name, counter)):
+            raise KeyError(f"'{counter}' hasn't been registered under '{cog_qualified_name}'.")
+        if cog_qualified_name.lower().startswith("red_"):
+            raise RuntimeError("You cannot increment counters in the 'red_' namespace.")
+        if not type(by) is int:
+            raise TypeError(
+                f"Expected 'by' to be an integer, received {by.__class__.__name__} instead."
+            )
+        elif by < 0:
+            raise ValueError(
+                f"'by' needs to be greater than or equals to 0, however '{by}' was provided."
+            )
+
+        self.__counters[cog_qualified_name][counter] += by
+        return self.__counters[cog_qualified_name][counter]
+
+    def _inc_core_raw(self, cog_qualified_name: str, counter: str, by: int = 1) -> int:
+        if not type(cog_qualified_name) is str:
+            raise TypeError(
+                f"Expected cog_qualified_name to be a string, received {cog_qualified_name.__class__.__name__} instead."
+            )
+        if not type(counter) is str:
+            raise TypeError(
+                f"Expected counter to be a string, received {counter.__class__.__name__} instead."
+            )
+        if not self.__contains__((cog_qualified_name, counter)):
+            raise KeyError(f"'{counter}' hasn't been registered under '{cog_qualified_name}'.")
+        if not cog_qualified_name.lower().startswith("red_"):
+            raise RuntimeError(
+                "You cannot increment counters outside the 'red_' namespace with this private method."
+            )
+        if not type(by) is int:
+            raise TypeError(
+                f"Expected counter to be an integer, received {counter.__class__.__name__} instead."
+            )
+        elif by < 0:
+            raise ValueError(
+                f"'by' needs to be greater than or equals to 0, however '{by}' was provided."
+            )
+
+        self.__counters[cog_qualified_name][counter] += by
+        return self.__counters[cog_qualified_name][counter]
+
+    def contains(self, cog: Cog, counter: str) -> bool:
+        return self.contains_raw(cog.qualified_name, counter)
+
+    def contains_raw(self, cog_qualified_name: str, counter: str) -> bool:
+        return self.__contains__(
+            (
+                cog_qualified_name,
+                counter,
+            )
+        )
+
+    def get_all(self) -> Dict[str, Dict[str, int]]:
+        return copy.deepcopy(self.__counters)
+
+    def walk_counters(self, cog: Optional[Cog] = None) -> Optional[Tuple[str, str, int]]:
+        if cog:
+            if isinstance(cog, Cog):
+                cog_name = cog.qualified_name
+            else:
+                cog_name = cog
+
+            if not type(cog_name) is str:
+                raise TypeError(
+                    f"Expected cog_name to be a string, received {cog_name.__class__.__name__} instead."
+                )
+            if cog_name not in self.__counters:
+                return
+            for counter, value in self.__counters[cog_name].items():
+                yield cog_name, counter, value
+        else:
+            for cog_name, cog_counters in self.__counters.items():
+                for counter, value in cog_counters.items():
+                    yield cog_name, counter, value
+
+    def __contains__(self, keys: Tuple[Union[Cog, str], str]) -> bool:
+        cog, counter = keys[0], keys[1]
+        if not type(counter) is str:
+            raise TypeError(
+                f"Expected counter to be a string, received {counter.__class__.__name__} instead."
+            )
+        if isinstance(cog, Cog):
+            cog_name = cog.qualified_name
+        else:
+            cog_name = cog
+
+        if not type(cog_name) is str:
+            raise TypeError(
+                f"Expected cog_name to be a string, received {cog_name.__class__.__name__} instead."
+            )
+        if cog_name in self.__counters:
+            if counter in self.__counters[cog_name]:
+                return True
+        return False
+
+    def __getitem__(self, keys: Tuple[Union[Cog, str], str]) -> int:
+        cog, counter = keys[0], keys[1]
+        if not type(counter) is str:
+            raise TypeError(
+                f"Expected counter to be a string, received {counter.__class__.__name__} instead."
+            )
+        if isinstance(cog, Cog):
+            cog_name = cog.qualified_name
+        else:
+            cog_name = cog
+        if not type(cog_name) is str:
+            raise TypeError(
+                f"Expected cog_name to be a string, received {cog_name.__class__.__name__} instead."
+            )
+        if cog_name not in self.__counters:
+            raise KeyError(f"'{cog_name}' hasn't registered any counters.")
+
+        if counter not in self.__counters[cog_name]:
+            raise KeyError(f"'{counter}' hasn't been registered under '{cog_name}'.")
+
+        return self.__counters[cog_name][counter]
+
+    def __dir__(self):
+        return [
+            "__contains__",
+            "__repr__",
+            "__getitem__",
+            "contains",
+            "contains_raw",
+            "get",
+            "get_all",
+            "get_raw",
+            "inc",
+            "inc_raw",
+            "register_counters",
+            "register_counters_raw",
+            "unregister_counter",
+            "unregister_counter_raw",
+            "walk_counters",
+        ]
+
+    def __delitem__(self, keys: Tuple[Union[Cog, str], str]) -> NoReturn:
+        raise NotImplementedError("This operation is not supported.")
+
+    def __setitem__(self, keys: Tuple[Union[Cog, str], str], value: int) -> NoReturn:
+        raise NotImplementedError("This operation is not supported.")
+
+    def __repr__(self) -> str:
+        return "ProxyCounter(cogs={}, counters={})".format(
+            len(self.__counters), sum(len(v) for v in self.__counters.values())
+        )
 
 
 def deprecated_removed(
@@ -357,3 +648,18 @@ class RichIndefiniteBarColumn(ProgressColumn):
             total=task.total,
             completed=task.completed,
         )
+
+
+def is_sudo_enabled():
+    """Deny the command if sudo mechanic is not enabled."""
+
+    async def predicate(ctx):
+        return ctx.bot._sudo_ctx_var is not None
+
+    return check(predicate)
+
+
+async def timed_unsu(user_id: int, bot: Red):
+    await asyncio.sleep(delay=await bot._config.sudotime())
+    bot._elevated_owner_ids -= {user_id}
+    bot._owner_sudo_tasks.pop(user_id, None)

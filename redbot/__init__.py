@@ -214,7 +214,7 @@ def _early_init():
     _ensure_no_colorama()
 
 
-__version__ = "3.5.0.dev1"
+__version__ = "3.5.0a69.dev26"
 version_info = VersionInfo.from_str(__version__)
 
 # Filter fuzzywuzzy slow sequence matcher warning
@@ -222,6 +222,8 @@ _warnings.filterwarnings("ignore", module=r"fuzzywuzzy.*")
 # Show DeprecationWarning
 _warnings.filterwarnings("default", category=DeprecationWarning)
 
+# Silence the Subclassing warning raised
+_warnings.filterwarnings("ignore", category=DeprecationWarning, module="redbot", lineno=242)
 if "--debug" not in _sys.argv:
     # DEP-WARN
     # Individual warnings - tracked in https://github.com/Cog-Creators/Red-DiscordBot/issues/3529

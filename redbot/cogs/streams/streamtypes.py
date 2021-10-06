@@ -1,6 +1,5 @@
 import asyncio
 import contextlib
-import json
 import logging
 import time
 from dateutil.parser import parse as parse_time
@@ -12,6 +11,8 @@ from typing import ClassVar, Optional, List, Tuple
 
 import aiohttp
 import discord
+
+from redbot import json
 
 from .errors import (
     APIError,
@@ -126,7 +127,7 @@ class YoutubeStream(Stream):
         elif not self.name:
             self.name = await self.fetch_name()
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(json_serialize=json.dumps) as session:
             async with session.get(YOUTUBE_CHANNEL_RSS.format(channel_id=self.id)) as r:
                 if r.status == 404:
                     raise StreamNotFound()
@@ -152,9 +153,9 @@ class YoutubeStream(Stream):
                 "id": video_id,
                 "part": "id,liveStreamingDetails",
             }
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(json_serialize=json.dumps) as session:
                 async with session.get(YOUTUBE_VIDEOS_ENDPOINT, params=params) as r:
-                    data = await r.json()
+                    data = await r.json(loads=json.loads)
                     try:
                         self._check_api_errors(data)
                     except InvalidYoutubeCredentials:
@@ -204,7 +205,7 @@ class YoutubeStream(Stream):
                 "id": self.livestreams[-1],
                 "part": "snippet,liveStreamingDetails",
             }
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(json_serialize=json.dumps) as session:
                 async with session.get(YOUTUBE_VIDEOS_ENDPOINT, params=params) as r:
                     data = await r.json()
             return await self.make_embed(data)
@@ -270,9 +271,9 @@ class YoutubeStream(Stream):
         else:
             params["id"] = self.id
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(json_serialize=json.dumps) as session:
             async with session.get(YOUTUBE_CHANNELS_ENDPOINT, params=params) as r:
-                data = await r.json()
+                data = await r.json(loads=json.loads)
 
         self._check_api_errors(data)
         if "items" in data and len(data["items"]) == 0:
@@ -315,6 +316,7 @@ class TwitchStream(Stream):
         self._bearer = kwargs.pop("bearer", None)
         self._rate_limit_resets: set = set()
         self._rate_limit_remaining: int = 0
+        self.games = kwargs.pop("games", {})
         super().__init__(**kwargs)
 
     @property
@@ -343,12 +345,42 @@ class TwitchStream(Stream):
                 wait_time = reset_time - current_time + 0.1
                 await asyncio.sleep(wait_time)
 
+    async def get_game_info_by_id(self, game_id: int):
+        header = {"Client-ID": str(self._client_id)}
+        if self._bearer is not None:
+            header = {**header, "Authorization": f"Bearer {self._bearer}"}
+        params = {"id": game_id}
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "https://api.twitch.tv/helix/games", headers=header, params=params
+            ) as r:
+                game_data = await r.json(encoding="utf-8")
+        if game_data:
+            return game_data
+        else:
+            return {}
+
+    async def get_game_info_by_name(self, game_name: str):
+        header = {"Client-ID": str(self._client_id)}
+        if self._bearer is not None:
+            header = {**header, "Authorization": f"Bearer {self._bearer}"}
+        params = {"name": game_name}
+        async with aiohttp.ClientSession(json_serialize=json.dumps) as session:
+            async with session.get(
+                "https://api.twitch.tv/helix/games", headers=header, params=params
+            ) as r:
+                game_data = await r.json(encoding="utf-8", loads=json.loads)
+        if game_data:
+            return game_data["data"]
+        else:
+            return []
+
     async def get_data(self, url: str, params: dict = {}) -> Tuple[Optional[int], dict]:
         header = {"Client-ID": str(self._client_id)}
         if self._bearer is not None:
             header["Authorization"] = f"Bearer {self._bearer}"
         await self.wait_for_rate_limit_reset()
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(json_serialize=json.dumps) as session:
             try:
                 async with session.get(url, headers=header, params=params, timeout=60) as resp:
                     remaining = resp.headers.get("Ratelimit-Remaining")
@@ -368,7 +400,7 @@ class TwitchStream(Stream):
                     if resp.status != 200:
                         return resp.status, {}
 
-                    return resp.status, await resp.json(encoding="utf-8")
+                    return resp.status, await resp.json(encoding="utf-8", loads=json.loads)
             except (aiohttp.ClientConnectionError, asyncio.TimeoutError) as exc:
                 log.warning("Connection error occurred when fetching Twitch stream", exc_info=exc)
                 return None, {}
@@ -408,11 +440,13 @@ class TwitchStream(Stream):
             if follows_data:
                 final_data["followers"] = follows_data["total"]
 
+                
             # Reset the retry count since we successfully got information about this
             # channel's streams
             self.retry_count = 0
 
             return self.make_embed(final_data), final_data["type"] == "rerun"
+
         elif stream_code == 400:
             raise InvalidTwitchCredentials()
         elif stream_code == 404:
@@ -434,6 +468,26 @@ class TwitchStream(Stream):
             raise InvalidTwitchCredentials()
         else:
             raise APIError(code, data)
+
+    async def fetch_id(self):
+        header = {"Client-ID": str(self._client_id)}
+        if self._bearer is not None:
+            header = {**header, "Authorization": f"Bearer {self._bearer}"}
+        url = TWITCH_ID_ENDPOINT
+        params = {"login": self.name}
+
+        status, data = await self.get_data(url, params)
+
+        if status == 200:
+            if not data["data"]:
+                raise StreamNotFound()
+            return data["data"][0]["id"]
+        elif status == 400:
+            raise StreamNotFound()
+        elif status == 401:
+            raise InvalidTwitchCredentials()
+        else:
+            raise APIError(data)
 
     def make_embed(self, data):
         is_rerun = data["type"] == "rerun"
@@ -468,7 +522,7 @@ class PicartoStream(Stream):
     async def is_online(self):
         url = "https://api.picarto.tv/api/v1/channel/name/" + self.name
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(json_serialize=json.dumps) as session:
             async with session.get(url) as r:
                 data = await r.text(encoding="utf-8")
         if r.status == 200:

@@ -3,7 +3,6 @@
 import asyncio
 import functools
 import getpass
-import json
 import logging
 import os
 import pip
@@ -17,13 +16,15 @@ from copy import deepcopy
 from pathlib import Path
 from typing import NoReturn
 
+from redbot import aiohttp
+
 import discord
 import rich
 
 # Set the event loop policies here so any subsequent `new_event_loop()`
 # calls, in particular those as a result of the following imports,
 # return the correct loop object.
-from redbot import _early_init, __version__
+from redbot import _early_init, __version__, json
 
 _early_init()
 
@@ -42,8 +43,6 @@ log = logging.getLogger("red.main")
 #
 #         Made by Twentysix, improved by many
 #
-
-
 def _get_instance_names():
     with data_manager.config_file.open(encoding="utf-8") as fs:
         data = json.load(fs)
@@ -488,6 +487,8 @@ def main():
     if cli_flags.edit:
         handle_edit(cli_flags)
         return
+    if cli_flags.no_compression:
+        from . import _discord_overloads
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
